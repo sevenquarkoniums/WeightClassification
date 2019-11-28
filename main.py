@@ -8,14 +8,24 @@ from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
 from sklearn import datasets as sklearndatasets
 from sklearn.model_selection import train_test_split
-from torch.autograd import Variable
 from torch.utils.data import Dataset
 from sklearn.preprocessing import scale,LabelBinarizer
 import numpy as np
 import matplotlib.pyplot as plt
 import datetime
+import matplotlib.patches as mpatches
+from torch.utils.data.sampler import SubsetRandomSampler
 
-mode = 'mnist'
+'''
+Warning:
+    1 num_workers>0 is super slow on windows.
+'''
+
+mode = 'weight'
+numEpoch = 20
+middleOutput = 1
+torch.manual_seed(0)
+np.random.seed(0) # fix the train_test_split output.
 
 class mnistNet(nn.Module):
     def __init__(self):
@@ -57,8 +67,23 @@ class irisNet(nn.Module):
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         x = self.fc3(x)
-        output = F.log_softmax(x, dim=1)
+        output = F.softmax(x, dim=1)
+            # test_loss could keep increase if using log_softmax.
         return output
+
+class weightNet(nn.Module):
+    def __init__(self):
+        super(weightNet, self).__init__()
+        num1, num2 = 100, 100
+        self.fc1 = nn.Linear(139, num1)
+        self.fc2 = nn.Linear(num1, num2)
+        self.fc3 = nn.Linear(num2, 1)
+
+    def forward(self, x):
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = torch.sigmoid(self.fc3(x))
+        return x
 
 class irisCreator(Dataset):
     def __init__(self, x, y):
@@ -66,21 +91,31 @@ class irisCreator(Dataset):
 #        self.Y = y
         self.mlb = LabelBinarizer()
         self.Y = self.mlb.fit_transform(y)
-
     def __getitem__(self, index):
         feature = torch.from_numpy(self.X[index])
         label = torch.LongTensor(self.Y[index])
         return feature, label
-
     def __len__(self):
         return len(self.X)
 
-def train(args, model, device, train_loader, optimizer, epoch):
+class weightCreator(Dataset):
+    def __init__(self, x, y):
+        self.X = x
+        self.Y = y
+    def __getitem__(self, index):
+        feature = self.X[index, :]
+        label = self.Y[index, :]
+        return feature, label
+    def __len__(self):
+        return self.X.shape[0]
+
+def train(args, model, device, train_loader, optimizer, epoch, criterion):
     model.train()
-    length = len(train_loader.dataset)
-#    length = len(train_loader[0][0])
-    if mode == 'iris':
-        criterion = torch.nn.CrossEntropyLoss()
+    if mode in ['iris','mnist']:
+        length = len(train_loader.dataset)
+    elif mode == 'weight':
+        length = 0
+    lossSum = 0
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
@@ -89,70 +124,92 @@ def train(args, model, device, train_loader, optimizer, epoch):
             label = torch.max(target, 1)[1]
             loss = criterion(output, label)
         elif mode == 'mnist':
-            loss = F.nll_loss(output, target)
+            loss = F.nll_loss(output, target, reduction='sum')
+        elif mode == 'weight':
+            loss = criterion(output, target)
+            length += data.shape[0]
+        lossSum += loss.item()
         loss.backward()
         optimizer.step()
-        if batch_idx % args.log_interval == 0:
-            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+        if middleOutput and batch_idx % args.log_interval == 0:
+            print('Train Epoch: {} [{}/{} ({:.0f}%)]'.format(
                 epoch, batch_idx * len(data), length,
-                100. * batch_idx / len(train_loader), loss.item()))
-    return loss.item()
+                100. * batch_idx / len(train_loader)))
+    lossSum /= length
+    return lossSum
 
 
-def test(args, model, device, test_loader):
+def test(args, model, device, test_loader, criterion):
     model.eval()
     test_loss = 0
-    correct = 0
-    length = len(test_loader.dataset)
-#    length = len(test_loader[0][0])
-    if mode == 'iris':
-        criterion = torch.nn.CrossEntropyLoss(reduction='sum')
+    aggregate = 0
+    if mode in ['iris','mnist']:
+        length = len(test_loader.dataset)
+    elif mode == 'weight':
+        length = 0
     with torch.no_grad():
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
             output = model(data)
             if mode == 'iris':
                 label = torch.max(target, 1)[1]
-                test_loss += criterion(output, label)
+                test_loss += criterion(output, label).item()
+                pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
+                aggregate += pred.eq(label.view_as(pred)).sum().item()
             elif mode == 'mnist':
                 test_loss += F.nll_loss(output, target, reduction='sum').item()  # sum up batch loss
-            pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
-            if mode == 'iris':
-                correct += pred.eq(label.view_as(pred)).sum().item()
-            elif mode == 'mnist':
-                correct += pred.eq(target.view_as(pred)).sum().item()
-
+                pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
+                aggregate += pred.eq(target.view_as(pred)).sum().item()
+            elif mode == 'weight':
+                test_loss += criterion(output, target).item()
+                aggregate += torch.abs(output - target).sum()
+                viewtest = torch.cat([output,target], dim=1)[:10, :]
+                length += data.shape[0]
     test_loss /= length
-    print('Test set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
-        test_loss, correct, length,
-        100. * correct / length))
-    return test_loss
+    accuracy = aggregate / length
+    if middleOutput:
+        if mode in ['iris','mnist']:
+            print('Test set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
+                test_loss, aggregate, length, 100. * accuracy))
+        elif mode == 'weight':
+            print('Test set: Average loss: {:.4f}, Error percentage: {:.1f}%\n'.format(
+                test_loss, 100. * accuracy))
+            print(viewtest)
+    return test_loss, accuracy
 
-def draw(loss_train, loss_test):
+def draw(loss_train, loss_test, acc):
     fig, ax = plt.subplots(1, 1, figsize=(7,7))
-    ax.plot(loss_train, '-b')
-    ax.plot(loss_test, '-', color='forestgreen')
+    colors = ['b','forestgreen','r']
+    ax.plot(loss_train, '-', color=colors[0])
+    ax.plot(loss_test, '-', color=colors[1])
+    ax.plot(acc, '-', color=colors[2])
+    if mode != 'weight':
+        ax.hlines(1, ax.get_xlim()[0], ax.get_xlim()[1], colors='k', linestyles='dashed')
+    patches, labels = [], ['training', 'testing', 'accuracy']
+    for i in range(len(colors)):
+        patches.append(mpatches.Patch(color=colors[i], label=''))
+    ax.legend(handles=patches, labels=labels, loc='upper right', ncol=1)
     plt.tight_layout()
 
 def main():
     now = datetime.datetime.now()
     # Training settings
     parser = argparse.ArgumentParser(description='Example')
-    parser.add_argument('--batch-size', type=int, default=64, metavar='N',
-                        help='input batch size for training (default: 64)')
-    parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N',
-                        help='input batch size for testing (default: 1000)')
-    parser.add_argument('--epochs', type=int, default=1000, metavar='N',
-                        help='number of epochs to train (default: 14)')
-    parser.add_argument('--lr', type=float, default=1, metavar='LR',
-                        help='learning rate (default: 1.0)')
-    parser.add_argument('--gamma', type=float, default=0.99, metavar='M',
-                        help='Learning rate step gamma (default: 0.7)')
+#    parser.add_argument('--batch-size', type=int, default=64, metavar='N',
+#                        help='input batch size for training (default: 64)')
+#    parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N',
+#                        help='input batch size for testing (default: 1000)')
+#    parser.add_argument('--epochs', type=int, default=1000, metavar='N',
+#                        help='number of epochs to train (default: 14)')
+#    parser.add_argument('--lr', type=float, default=1, metavar='LR',
+#                        help='learning rate (default: 1.0)')
+#    parser.add_argument('--gamma', type=float, default=0.99, metavar='M',
+#                        help='Learning rate step gamma (default: 0.7)')
     parser.add_argument('--no-cuda', action='store_true', default=False,
                         help='disables CUDA training')
     parser.add_argument('--seed', type=int, default=0, metavar='S',
                         help='random seed (default: 1)')
-    parser.add_argument('--log-interval', type=int, default=100, metavar='N',
+    parser.add_argument('--log-interval', type=int, default=500, metavar='N',
                         help='how many batches to wait before logging training status')
 
     parser.add_argument('--save-model', action='store_true', default=True,
@@ -160,12 +217,10 @@ def main():
     args = parser.parse_args()
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
-
     device = torch.device("cuda" if use_cuda else "cpu")
-
-    kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
-    
+    kwargs = {'num_workers': 0, 'pin_memory': True} if use_cuda else {}
     # loading data.
+    print('loading data..')
     if mode == 'mnist':
         train_loader = torch.utils.data.DataLoader(
             datasets.MNIST('data', train=True, download=True,
@@ -173,49 +228,72 @@ def main():
                                transforms.ToTensor(),
                                transforms.Normalize((0.1307,), (0.3081,))
                            ])),
-            batch_size=args.batch_size, shuffle=True, **kwargs)
+            batch_size=64, shuffle=True, **kwargs)
         test_loader = torch.utils.data.DataLoader(
             datasets.MNIST('data', train=False, transform=transforms.Compose([
                                transforms.ToTensor(),
                                transforms.Normalize((0.1307,), (0.3081,))
                            ])),
-            batch_size=args.test_batch_size, shuffle=True, **kwargs)
+            batch_size=1000, shuffle=True, **kwargs)
     elif mode == 'iris':
-        print('loading iris..')
         iris = sklearndatasets.load_iris()
         scaled = scale(iris.data)
-        X_train, X_test, Y_train, Y_test = train_test_split(scaled, iris.target, test_size=0.20, random_state=0)
+        X_train, X_test, Y_train, Y_test = train_test_split(scaled, iris.target, test_size=0.3333, random_state=0)
         trainset = irisCreator(X_train, Y_train)
         testset = irisCreator(X_test, Y_test)
-        train_loader = torch.utils.data.DataLoader(trainset, batch_size=8, shuffle=True, **kwargs)
-        test_loader = torch.utils.data.DataLoader(testset, batch_size=30, shuffle=False, **kwargs)
+        train_loader = torch.utils.data.DataLoader(trainset, batch_size=10, shuffle=True, **kwargs)
+        test_loader = torch.utils.data.DataLoader(testset, batch_size=50, shuffle=True, **kwargs)
+    elif mode == 'weight':
+        test_size = 0.2
+        acc, weight = torch.load('data/irisAcc_0.pt'), torch.load('data/irisWeight_0.pt')
+        accShuffle, weightShuffle = torch.load('data/irisShuffleAcc_0.pt'), torch.load('data/irisShuffleWeight_0.pt')
+        accAll = torch.cat([acc, accShuffle], dim=0).unsqueeze(1)
+        weightAll = torch.cat([weight, weightShuffle], dim=0)
+        dataset = weightCreator(weightAll, accAll)
+        dataset_size = len(dataset)
+        indices = list(range(dataset_size))
+        split = int(np.floor(test_size * dataset_size))
+        np.random.shuffle(indices)
+        train_indices, test_indices = indices[split:], indices[:split]
+        train_sampler = SubsetRandomSampler(train_indices)
+        test_sampler = SubsetRandomSampler(test_indices)
+        train_loader = torch.utils.data.DataLoader(dataset, batch_size=64, sampler=train_sampler, **kwargs)
+        test_loader = torch.utils.data.DataLoader(dataset, batch_size=1000, sampler=test_sampler, **kwargs)
 
-#        X_train = Variable(torch.Tensor(X_train).float())
-#        X_test = Variable(torch.Tensor(X_test).float())
-#        Y_train = Variable(torch.Tensor(Y_train).long())
-#        Y_test = Variable(torch.Tensor(Y_test).long())
-#        train_loader = [(X_train, Y_train)]
-#        test_loader = [(X_test, Y_test)]
-        print('finish loading.')
+    print('finish loading.')
 
-    torch.manual_seed(0)
     if mode == 'mnist':
         model = mnistNet().to(device)
+        optimizer = optim.Adadelta(model.parameters(), lr=1)
+        scheduler = StepLR(optimizer, step_size=1, gamma=0.7)
+        criterion = None
     elif mode == 'iris':
         model = irisNet().to(device)
-    optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
-
-    scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
-    loss_train, loss_test = [], []
-    for epoch in range(1, args.epochs + 1):
-        loss_train.append(train(args, model, device, train_loader, optimizer, epoch))
-        loss_test.append(test(args, model, device, test_loader))
-        scheduler.step()
+#        optimizer = optim.Adadelta(model.parameters(), lr=1)
+        optimizer = optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.999), weight_decay=0)
+        scheduler = StepLR(optimizer, step_size=1, gamma=0.97)
+        criterion = torch.nn.CrossEntropyLoss(reduction='sum')
+    elif mode == 'weight':
+        model = weightNet().to(device)
+#        optimizer = optim.Adadelta(model.parameters(), lr=1)
+        optimizer = optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.999), weight_decay=0)
+        scheduler = StepLR(optimizer, step_size=1, gamma=0.99)
+        criterion = torch.nn.MSELoss(reduction='sum')
+    loss_train, loss_test, acc = [], [], []
+    for epoch in range(numEpoch):
+        if epoch % 100 == 0:
+            print('epoch %d' % epoch)
+        thisTrain = train(args, model, device, train_loader, optimizer, epoch, criterion)
+        loss_train.append(thisTrain)
+        thisTest = test(args, model, device, test_loader, criterion)
+        loss_test.append(thisTest[0])
+        acc.append(thisTest[1])
+#        scheduler.step() # no need scheduler if using adam.
 
     if args.save_model:
         torch.save(model.state_dict(), "%s.pt" % mode)
 
-    draw(loss_train, loss_test)
+    draw(loss_train, loss_test, acc)
     print('finished in %d seconds.' % (datetime.datetime.now()-now).seconds)
 
 if __name__ == '__main__':
