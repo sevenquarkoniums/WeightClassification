@@ -82,8 +82,8 @@ for iteration in range(iteration):
                   net.state_dict()['fc2.weight'].view(1, -1).squeeze(),
                   net.state_dict()['fc2.bias'],
                   net.state_dict()['fc3.weight'].view(1, -1).squeeze(),
-                  net.state_dict()['fc3.bias'],
-            ]
+                  net.state_dict()['fc3.bias']
+                  ]
     catweight = torch.cat(weightlist, dim=0)
     weight.append(catweight)
 #    print('prediction accuracy', accuracy_score(test_y.data, predict_y.data))
