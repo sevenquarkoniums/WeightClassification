@@ -1,19 +1,21 @@
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, precision_score, recall_score
+from sklearn.metrics import accuracy_score
 import datetime
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.autograd import Variable
 import matplotlib.pyplot as plt
 from torch.optim.lr_scheduler import StepLR
 import numpy as np
 
-seed = 0
-print('seed: %d' % seed)
-torch.manual_seed(seed)
-np.random.seed(seed)
+trainingSeed = 0
+shuffleLabel = 1 # shuffle the training set label to make random weights.
+save = 1
+showFig = 0
+print('training seed: %d' % trainingSeed)
+torch.manual_seed(trainingSeed)
+np.random.seed(0) # fix the train_test_split output.
 
 iteration = 200*1000
 
@@ -47,24 +49,27 @@ dataset.loc[dataset.species=='Iris-virginica', 'species'] = 2
 train_X, test_X, train_y, test_y = train_test_split(dataset[dataset.columns[0:4]].values,
                                                     dataset.species.values, test_size=0.3333)
 
-# wrap up with Variable in pytorch
-train_X = Variable(torch.Tensor(train_X).float())
-test_X = Variable(torch.Tensor(test_X).float())
-train_y = Variable(torch.Tensor(train_y).long())
-test_y = Variable(torch.Tensor(test_y).long())
+train_X = torch.Tensor(train_X)
+test_X = torch.Tensor(test_X)
+train_y = torch.Tensor(train_y).long()
+test_y = torch.Tensor(test_y).long()
+testsize = train_y.shape[0]
 
 criterion = nn.CrossEntropyLoss()# cross entropy loss
 
 now = datetime.datetime.now()
 accuracy, weight = [], []
 for iteration in range(iteration):
+    if shuffleLabel:
+        train_y = train_y[torch.randperm(testsize)]
     if iteration % 1000 == 0:
         print('iter %d' % iteration)
     net = Net()
     net.train()
     optimizer = torch.optim.SGD(net.parameters(), lr=1)
     scheduler = StepLR(optimizer, step_size=1, gamma=0.97)
-#    loss_train = []
+    if showFig:
+        loss_train = []
     for epoch in range(100):
         optimizer.zero_grad()
         out = net(train_X)
@@ -72,7 +77,8 @@ for iteration in range(iteration):
         loss.backward()
         optimizer.step()
         scheduler.step()
-#        loss_train.append(loss)
+        if showFig:
+            loss_train.append(loss)
     net.eval()
     predict_out = net(test_X)
     _, predict_y = torch.max(predict_out, 1)
@@ -86,17 +92,23 @@ for iteration in range(iteration):
                   ]
     catweight = torch.cat(weightlist, dim=0)
     weight.append(catweight)
-#    print('prediction accuracy', accuracy_score(test_y.data, predict_y.data))
-#    print('macro precision' + str(precision_score(test_y.data, predict_y.data, average='macro')))
-#    print('micro precision' + str( precision_score(test_y.data, predict_y.data, average='micro')))
+
+if showFig:
+    fig, ax = plt.subplots(1, 1, figsize=(7,7))
+    ax.plot(loss_train, '-', color='forestgreen')
+    plt.tight_layout()
 
 print('avg accuracy: %.3f +- %.3f' % (sum(accuracy)/len(accuracy), np.std(accuracy)))
-#fig, ax = plt.subplots(1, 1, figsize=(7,7))
-#ax.plot(loss_train, '-', color='forestgreen')
-#plt.tight_layout()
 allAcc = torch.FloatTensor(accuracy)
 allWeight = torch.stack(weight, dim=0)
-torch.save(allAcc, 'data/irisAcc_%d.pt' % seed)
-torch.save(allWeight, 'data/irisWeight_%d.pt' % seed)
+if shuffleLabel:
+    name1 = 'data/irisShuffleAcc_%d.pt' % trainingSeed
+    name2 = 'data/irisShuffleWeight_%d.pt' % trainingSeed
+else:
+    name1 = 'data/irisAcc_%d.pt' % trainingSeed
+    name2 = 'data/irisWeight_%d.pt' % trainingSeed
+if save:
+    torch.save(allAcc, name1)
+    torch.save(allWeight, name2)
 
 print('finished in %d seconds.' % (datetime.datetime.now()-now).seconds)
