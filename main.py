@@ -22,9 +22,11 @@ Warning:
 '''
 
 mode = 'weight'
+netType = '3hidden'
 numEpoch = 20
 middleOutput = 1
 torch.manual_seed(0)
+fontsize = 15
 np.random.seed(0) # fix the train_test_split output.
 
 class mnistNet(nn.Module):
@@ -74,15 +76,39 @@ class irisNet(nn.Module):
 class weightNet(nn.Module):
     def __init__(self):
         super(weightNet, self).__init__()
-        num1, num2 = 100, 100
-        self.fc1 = nn.Linear(139, num1)
-        self.fc2 = nn.Linear(num1, num2)
-        self.fc3 = nn.Linear(num2, 1)
+        if netType == 'linear':
+            self.fc1 = nn.Linear(139, 1)
+        elif netType == '1hidden':
+            num1 = 1000
+            self.fc1 = nn.Linear(139, num1)
+            self.fc2 = nn.Linear(num1, 1)
+        elif netType == '2hidden':
+            num1, num2 = 1000, 100
+            self.fc1 = nn.Linear(139, num1)
+            self.fc2 = nn.Linear(num1, num2)
+            self.fc3 = nn.Linear(num2, 1)
+        elif netType == '3hidden':
+            num1, num2, num3 = 1000, 300, 100
+            self.fc1 = nn.Linear(139, num1)
+            self.fc2 = nn.Linear(num1, num2)
+            self.fc3 = nn.Linear(num2, num3)
+            self.fc4 = nn.Linear(num3, 1)
 
     def forward(self, x):
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = torch.sigmoid(self.fc3(x))
+        if netType == 'linear':
+            x = torch.sigmoid(self.fc1(x))
+        elif netType == '1hidden':
+            x = F.relu(self.fc1(x))
+            x = torch.sigmoid(self.fc2(x))
+        elif netType == '2hidden':
+            x = F.relu(self.fc1(x))
+            x = F.relu(self.fc2(x))
+            x = torch.sigmoid(self.fc3(x))
+        elif netType == '3hidden':
+            x = F.relu(self.fc1(x))
+            x = F.relu(self.fc2(x))
+            x = F.relu(self.fc3(x))
+            x = torch.sigmoid(self.fc4(x))
         return x
 
 class irisCreator(Dataset):
@@ -132,9 +158,8 @@ def train(args, model, device, train_loader, optimizer, epoch, criterion):
         loss.backward()
         optimizer.step()
         if middleOutput and batch_idx % args.log_interval == 0:
-            print('Train Epoch: {} [{}/{} ({:.0f}%)]'.format(
-                epoch, batch_idx * len(data), length,
-                100. * batch_idx / len(train_loader)))
+            print('Train Epoch: {} [{}]'.format(
+                epoch, batch_idx * len(data)))
     lossSum /= length
     return lossSum
 
@@ -178,18 +203,25 @@ def test(args, model, device, test_loader, criterion):
     return test_loss, accuracy
 
 def draw(loss_train, loss_test, acc):
+    plt.rc('xtick', labelsize=fontsize)
+    plt.rc('ytick', labelsize=fontsize)
     fig, ax = plt.subplots(1, 1, figsize=(7,7))
     colors = ['b','forestgreen','r']
     ax.plot(loss_train, '-', color=colors[0])
     ax.plot(loss_test, '-', color=colors[1])
     ax.plot(acc, '-', color=colors[2])
-    if mode != 'weight':
+    patches, labels = [], ['train loss', 'test loss']
+    if mode in ['iris','mnist']:
         ax.hlines(1, ax.get_xlim()[0], ax.get_xlim()[1], colors='k', linestyles='dashed')
-    patches, labels = [], ['training', 'testing', 'accuracy']
+        labels.append('accuracy')
+    elif mode == 'weight':
+        labels.append('avg error')
     for i in range(len(colors)):
         patches.append(mpatches.Patch(color=colors[i], label=''))
-    ax.legend(handles=patches, labels=labels, loc='upper right', ncol=1)
+    ax.legend(handles=patches, labels=labels, loc='upper right', ncol=1, fontsize=fontsize)
+    ax.set_xlabel('Epoch', fontsize=fontsize)
     plt.tight_layout()
+    plt.savefig('figure/%s.png' % mode)
 
 def main():
     now = datetime.datetime.now()
@@ -209,7 +241,7 @@ def main():
                         help='disables CUDA training')
     parser.add_argument('--seed', type=int, default=0, metavar='S',
                         help='random seed (default: 1)')
-    parser.add_argument('--log-interval', type=int, default=500, metavar='N',
+    parser.add_argument('--log-interval', type=int, default=1000, metavar='N',
                         help='how many batches to wait before logging training status')
 
     parser.add_argument('--save-model', action='store_true', default=True,
