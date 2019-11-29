@@ -22,9 +22,10 @@ Warning:
 '''
 
 mode = 'weight'
-netType = '3hidden'
-numEpoch = 20
+netType = 'gcn' # linear, 1hidden, 2hidden, 3hidden, gnn, gcn.
+numEpoch = 10
 middleOutput = 1
+save_model = 1
 torch.manual_seed(0)
 fontsize = 15
 np.random.seed(0) # fix the train_test_split output.
@@ -93,6 +94,31 @@ class weightNet(nn.Module):
             self.fc2 = nn.Linear(num1, num2)
             self.fc3 = nn.Linear(num2, num3)
             self.fc4 = nn.Linear(num3, 1)
+        elif netType == 'gnn':
+            # No weights are shared. very slow. need update.
+            self.channel = 10
+            self.link = nn.ModuleDict()
+            for c in range(self.channel):
+                for i in range(8):
+                    self.link['(1,%d,0,%d)' % (c,i)] = nn.Linear(13, 1)
+                for i in range(8):
+                    self.link['(1,%d,1,%d)' % (c,i)] = nn.Linear(12, 1)
+                for i in range(3):
+                    self.link['(1,%d,2,%d)' % (c,i)] = nn.Linear(4, 1)
+            self.fc1 = nn.Linear(190, 100)
+            self.fc2 = nn.Linear(100, 100)
+            self.fc3 = nn.Linear(100, 1)
+        elif netType == 'gcn':
+            # Sharing weights.
+            self.channel = 16
+            self.link = nn.ModuleDict()
+            self.link['(1,0)'] = nn.Linear(21, self.channel)
+            self.link['(1,1)'] = nn.Linear(23, self.channel)
+            self.link['(1,2)'] = nn.Linear(12, self.channel)
+            self.fc1 = nn.Linear(19*self.channel, 64)
+            self.fc2 = nn.Linear(64, 64)
+            self.fc3 = nn.Linear(64, 1)
+#            self.leakyrelu = nn.LeakyReLU()
 
     def forward(self, x):
         if netType == 'linear':
@@ -109,6 +135,41 @@ class weightNet(nn.Module):
             x = F.relu(self.fc2(x))
             x = F.relu(self.fc3(x))
             x = torch.sigmoid(self.fc4(x))
+        elif netType == 'gnn':
+            # mapping is wrong.
+            layer1 = []
+            for c in range(self.channel):
+                for i in range(8):
+                    idx = [4*i+0,4*i+1,4*i+2,4*i+3,i+32,8*i+40,8*i+41,8*i+42,8*i+43,8*i+44,8*i+45,8*i+46,8*i+47]
+                    layer1.append(self.link['(1,%d,0,%d)' % (c,i)](x[:,idx]))
+                for i in range(8):
+                    idx = [8*i+40,8*i+41,8*i+42,8*i+43,8*i+44,8*i+45,8*i+46,8*i+47,i+104,3*i+112,3*i+113,3*i+114]
+                    layer1.append(self.link['(1,%d,1,%d)' % (c,i)](x[:,idx]))
+                for i in range(3):
+                    idx = [3*i+112,3*i+113,3*i+114,i+136]
+                    layer1.append(self.link['(1,%d,2,%d)' % (c,i)](x[:,idx]))
+            x = F.relu(torch.cat(layer1, dim=1))
+            x = F.relu(self.fc1(x))
+            x = F.relu(self.fc2(x))
+            x = torch.sigmoid(self.fc3(x))
+        elif netType == 'gcn':
+            layer1 = []
+            for i in range(8):
+                idx = [4*i+0,4*i+1,4*i+2,4*i+3,i+32,i+40,i+48,i+56,i+64,i+72,i+80,i+88,i+96,104,105,106,107,108,109,110,111]
+                layer1.append(self.link['(1,0)'](x[:,idx]))
+            for i in range(8):
+                idx = [32,33,34,35,36,37,38,39,8*i+40,8*i+41,8*i+42,8*i+43,8*i+44,8*i+45,8*i+46,8*i+47,i+104,i+112,i+120,i+128,136,137,138]
+                layer1.append(self.link['(1,1)'](x[:,idx]))
+            for i in range(3):
+                idx = [104,105,106,107,108,109,110,111,3*i+112,3*i+113,3*i+114,i+136]
+                layer1.append(self.link['(1,2)'](x[:,idx]))
+            x = F.relu(torch.cat(layer1, dim=1))
+            x = F.relu(self.fc1(x))
+            x = F.relu(self.fc2(x))
+#            x = self.leakyrelu(torch.cat(layer1, dim=1))
+#            x = self.leakyrelu(self.fc1(x))
+#            x = self.leakyrelu(self.fc2(x))
+            x = torch.sigmoid(self.fc3(x))
         return x
 
 class irisCreator(Dataset):
@@ -223,8 +284,7 @@ def draw(loss_train, loss_test, acc):
     plt.tight_layout()
     plt.savefig('figure/%s.png' % mode)
 
-def main():
-    now = datetime.datetime.now()
+def build():
     # Training settings
     parser = argparse.ArgumentParser(description='Example')
 #    parser.add_argument('--batch-size', type=int, default=64, metavar='N',
@@ -239,13 +299,13 @@ def main():
 #                        help='Learning rate step gamma (default: 0.7)')
     parser.add_argument('--no-cuda', action='store_true', default=False,
                         help='disables CUDA training')
-    parser.add_argument('--seed', type=int, default=0, metavar='S',
-                        help='random seed (default: 1)')
+#    parser.add_argument('--seed', type=int, default=0, metavar='S',
+#                        help='random seed (default: 1)')
     parser.add_argument('--log-interval', type=int, default=1000, metavar='N',
                         help='how many batches to wait before logging training status')
 
-    parser.add_argument('--save-model', action='store_true', default=True,
-                        help='For Saving the current Model')
+#    parser.add_argument('--save-model', action='store_true', default=True,
+#                        help='For Saving the current Model')
     args = parser.parse_args()
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -321,11 +381,30 @@ def main():
         loss_test.append(thisTest[0])
         acc.append(thisTest[1])
 #        scheduler.step() # no need scheduler if using adam.
-
-    if args.save_model:
+#    print(model.state_dict())
+    if save_model:
         torch.save(model.state_dict(), "%s.pt" % mode)
 
     draw(loss_train, loss_test, acc)
+    
+def randomInput():
+    device = torch.device("cuda")
+    model = weightNet().to(device)
+    model.load_state_dict(torch.load('weight.pt'))
+    model.eval()
+    data = torch.Tensor(np.random.normal(loc=0.0, scale=0.5, size=(100000, 139))).to(device)
+    output = model(data)
+    outputnp = output.squeeze().cpu().detach().numpy()
+    n, bins, patches = plt.hist(outputnp, 300, facecolor='deepskyblue')
+    plt.savefig('figure/randomInput.png')
+    plt.tight_layout()
+    
+def main():
+    now = datetime.datetime.now()
+    
+    build()
+#    randomInput()
+    
     print('finished in %d seconds.' % (datetime.datetime.now()-now).seconds)
 
 if __name__ == '__main__':
