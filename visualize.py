@@ -17,5 +17,13 @@ def drawWeight():
         plt.tight_layout()
         plt.close()
 
-
-drawWeight()
+def drawAcc():
+    acc, weight = torch.load('data/irisAcc_0.pt'), torch.load('data/irisWeight_0.pt')
+    accShuffle, weightShuffle = torch.load('data/irisShuffleAcc_0.pt'), torch.load('data/irisShuffleWeight_0.pt')
+    n, bins, patches = plt.hist(acc, 300, facecolor='orange')
+    plt.savefig('figure/Acc.png')
+    n, bins, patches = plt.hist(accShuffle, 300, facecolor='orange')
+    plt.savefig('figure/AccShuffle.png')
+    
+#drawWeight()
+drawAcc()

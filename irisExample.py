@@ -9,15 +9,15 @@ import matplotlib.pyplot as plt
 from torch.optim.lr_scheduler import StepLR
 import numpy as np
 
-trainingSeed = 0
+trainingSeed = 2
 shuffleLabel = 1 # shuffle the training set label to make random weights.
-save = 1
+save = 0
 showFig = 0
 print('training seed: %d' % trainingSeed)
 torch.manual_seed(trainingSeed)
 np.random.seed(0) # fix the train_test_split output.
 
-iteration = 200*1000
+iteration = 1000
 
 class Net(nn.Module):
     # define nn
@@ -65,11 +65,12 @@ for iteration in range(iteration):
     if iteration % 1000 == 0:
         print('iter %d' % iteration)
     net = Net()
+    if showFig:
+        loss_train = []
+    
     net.train()
     optimizer = torch.optim.SGD(net.parameters(), lr=1)
     scheduler = StepLR(optimizer, step_size=1, gamma=0.97)
-    if showFig:
-        loss_train = []
     for epoch in range(100):
         optimizer.zero_grad()
         out = net(train_X)
@@ -79,10 +80,14 @@ for iteration in range(iteration):
         scheduler.step()
         if showFig:
             loss_train.append(loss)
+    
     net.eval()
     predict_out = net(test_X)
     _, predict_y = torch.max(predict_out, 1)
-    accuracy.append(accuracy_score(test_y.data, predict_y.data))
+    acc = accuracy_score(test_y.data, predict_y.data)
+#    if acc == 0:
+#        print(torch.stack([test_y, predict_y], dim=1))
+    accuracy.append(acc)
     weightlist = [net.state_dict()['fc1.weight'].view(1, -1).squeeze(),
                   net.state_dict()['fc1.bias'],
                   net.state_dict()['fc2.weight'].view(1, -1).squeeze(),

@@ -22,7 +22,7 @@ Warning:
 '''
 
 mode = 'weight'
-netType = 'gcn' # linear, 1hidden, 2hidden, 3hidden, gnn, gcn.
+netType = 'gcnres' # linear, 1hidden, 2hidden, 3hidden, gnn, gcn, gcn2， gcnres.
 numEpoch = 10
 middleOutput = 1
 save_model = 1
@@ -110,15 +110,41 @@ class weightNet(nn.Module):
             self.fc3 = nn.Linear(100, 1)
         elif netType == 'gcn':
             # Sharing weights.
-            self.channel = 16
+            self.channel = 32
             self.link = nn.ModuleDict()
             self.link['(1,0)'] = nn.Linear(21, self.channel)
             self.link['(1,1)'] = nn.Linear(23, self.channel)
             self.link['(1,2)'] = nn.Linear(12, self.channel)
-            self.fc1 = nn.Linear(19*self.channel, 64)
-            self.fc2 = nn.Linear(64, 64)
+            self.fc1 = nn.Linear(19*self.channel, 128)
+            self.fc2 = nn.Linear(128, 64)
             self.fc3 = nn.Linear(64, 1)
-#            self.leakyrelu = nn.LeakyReLU()
+        elif netType == 'gcn2':
+            # Sharing weights.
+            self.channel, self.channel2 = 32, 32
+            self.link = nn.ModuleDict()
+            self.link['(1,0)'] = nn.Linear(21, self.channel)
+            self.link['(1,1)'] = nn.Linear(23, self.channel)
+            self.link['(1,2)'] = nn.Linear(12, self.channel)
+            self.link['(2,0)'] = nn.Linear(9*self.channel, self.channel2)
+            self.link['(2,1)'] = nn.Linear(9*self.channel, self.channel2)
+            self.link['(2,2)'] = nn.Linear(9*self.channel, self.channel2)
+            self.fc1 = nn.Linear(19*self.channel2, 512)
+            self.fc2 = nn.Linear(512, 1)
+        elif netType == 'gcnres':
+            # Sharing weights.
+            self.channel, self.channel2, self.channel3 = 32, 32, 32
+            self.link = nn.ModuleDict()
+            self.link['(1,0)'] = nn.Linear(21, self.channel)
+            self.link['(1,1)'] = nn.Linear(23, self.channel)
+            self.link['(1,2)'] = nn.Linear(12, self.channel)
+            self.link['(2,0)'] = nn.Linear(9*self.channel, self.channel2)
+            self.link['(2,1)'] = nn.Linear(9*self.channel, self.channel2)
+            self.link['(2,2)'] = nn.Linear(9*self.channel, self.channel2)
+            self.link['(3,0)'] = nn.Linear(9*self.channel2, self.channel3)
+            self.link['(3,1)'] = nn.Linear(9*self.channel2, self.channel3)
+            self.link['(3,2)'] = nn.Linear(9*self.channel2, self.channel3)
+            self.fc1 = nn.Linear(19*self.channel3, 512)
+            self.fc2 = nn.Linear(512, 1)
 
     def forward(self, x):
         if netType == 'linear':
@@ -164,12 +190,91 @@ class weightNet(nn.Module):
                 idx = [104,105,106,107,108,109,110,111,3*i+112,3*i+113,3*i+114,i+136]
                 layer1.append(self.link['(1,2)'](x[:,idx]))
             x = F.relu(torch.cat(layer1, dim=1))
+            # no speed up.
+#            stack = []
+#            for i in range(8):
+#                idx = [4*i+0,4*i+1,4*i+2,4*i+3,i+32,i+40,i+48,i+56,i+64,i+72,i+80,i+88,i+96,104,105,106,107,108,109,110,111]
+#                stack.append(x[:,idx])
+#            layer1.append(self.link['(1,0)'](torch.stack(stack, dim=0)))
+#            stack = []
+#            for i in range(8):
+#                idx = [32,33,34,35,36,37,38,39,8*i+40,8*i+41,8*i+42,8*i+43,8*i+44,8*i+45,8*i+46,8*i+47,i+104,i+112,i+120,i+128,136,137,138]
+#                stack.append(x[:,idx])
+#            layer1.append(self.link['(1,1)'](torch.stack(stack, dim=0)))
+#            stack = []
+#            for i in range(3):
+#                idx = [104,105,106,107,108,109,110,111,3*i+112,3*i+113,3*i+114,i+136]
+#                stack.append(x[:,idx])
+#                layer1.append(self.link['(1,2)'](torch.stack(stack, dim=0)))
+#            together = torch.cat(layer1, dim=0)
+#            x = F.relu(torch.cat([together[i,:,:] for i in range(19)], dim=1))
             x = F.relu(self.fc1(x))
             x = F.relu(self.fc2(x))
-#            x = self.leakyrelu(torch.cat(layer1, dim=1))
-#            x = self.leakyrelu(self.fc1(x))
-#            x = self.leakyrelu(self.fc2(x))
             x = torch.sigmoid(self.fc3(x))
+        elif netType == 'gcn2':
+            layer1 = []
+            for i in range(8):
+                idx = [4*i+0,4*i+1,4*i+2,4*i+3,i+32,i+40,i+48,i+56,i+64,i+72,i+80,i+88,i+96,104,105,106,107,108,109,110,111]
+                layer1.append(self.link['(1,0)'](x[:,idx]))
+            for i in range(8):
+                idx = [32,33,34,35,36,37,38,39,8*i+40,8*i+41,8*i+42,8*i+43,8*i+44,8*i+45,8*i+46,8*i+47,i+104,i+112,i+120,i+128,136,137,138]
+                layer1.append(self.link['(1,1)'](x[:,idx]))
+            for i in range(3):
+                idx = [104,105,106,107,108,109,110,111,3*i+112,3*i+113,3*i+114,i+136]
+                layer1.append(self.link['(1,2)'](x[:,idx]))
+            x = F.relu(torch.cat(layer1, dim=1))
+            layer2 = []
+            c = self.channel
+            for i in range(8):
+                idx = list(range(i*c,(i+1)*c))+list(range(8*c,16*c))
+                layer2.append(self.link['(2,0)'](x[:,idx]))
+            for i in range(8):
+                idx = list(range(8*c))+list(range((8+i)*c,(9+i)*c))
+                layer2.append(self.link['(2,1)'](x[:,idx]))
+            for i in range(3):
+                idx = list(range(8*c,16*c))+list(range((16+i)*c,(17+i)*c))
+                layer2.append(self.link['(2,2)'](x[:,idx]))
+            x = F.relu(torch.cat(layer2, dim=1))
+            x = F.relu(self.fc1(x))
+            x = torch.sigmoid(self.fc2(x))
+        elif netType == 'gcnres':
+            layer1 = []
+            for i in range(8):
+                idx = [4*i+0,4*i+1,4*i+2,4*i+3,i+32,i+40,i+48,i+56,i+64,i+72,i+80,i+88,i+96,104,105,106,107,108,109,110,111]
+                layer1.append(self.link['(1,0)'](x[:,idx]))
+            for i in range(8):
+                idx = [32,33,34,35,36,37,38,39,8*i+40,8*i+41,8*i+42,8*i+43,8*i+44,8*i+45,8*i+46,8*i+47,i+104,i+112,i+120,i+128,136,137,138]
+                layer1.append(self.link['(1,1)'](x[:,idx]))
+            for i in range(3):
+                idx = [104,105,106,107,108,109,110,111,3*i+112,3*i+113,3*i+114,i+136]
+                layer1.append(self.link['(1,2)'](x[:,idx]))
+            x = F.relu(torch.cat(layer1, dim=1))
+            layer2 = []
+            c = self.channel
+            for i in range(8):
+                idx = list(range(i*c,(i+1)*c))+list(range(8*c,16*c))
+                layer2.append(self.link['(2,0)'](x[:,idx]))
+            for i in range(8):
+                idx = list(range(8*c))+list(range((8+i)*c,(9+i)*c))
+                layer2.append(self.link['(2,1)'](x[:,idx]))
+            for i in range(3):
+                idx = list(range(8*c,16*c))+list(range((16+i)*c,(17+i)*c))
+                layer2.append(self.link['(2,2)'](x[:,idx]))
+            y = F.relu(torch.cat(layer2, dim=1))
+            layer3 = []
+            c = self.channel2
+            for i in range(8):
+                idx = list(range(i*c,(i+1)*c))+list(range(8*c,16*c))
+                layer3.append(self.link['(3,0)'](y[:,idx]))
+            for i in range(8):
+                idx = list(range(8*c))+list(range((8+i)*c,(9+i)*c))
+                layer3.append(self.link['(3,1)'](y[:,idx]))
+            for i in range(3):
+                idx = list(range(8*c,16*c))+list(range((16+i)*c,(17+i)*c))
+                layer3.append(self.link['(3,2)'](y[:,idx]))
+            x = F.relu(x + torch.cat(layer3, dim=1))
+            x = F.relu(self.fc1(x))
+            x = torch.sigmoid(self.fc2(x))
         return x
 
 class irisCreator(Dataset):
@@ -392,7 +497,7 @@ def randomInput():
     model = weightNet().to(device)
     model.load_state_dict(torch.load('weight.pt'))
     model.eval()
-    data = torch.Tensor(np.random.normal(loc=0.0, scale=0.5, size=(100000, 139))).to(device)
+    data = torch.Tensor(np.random.normal(loc=0.0, scale=0.3, size=(10000, 139))).to(device)
     output = model(data)
     outputnp = output.squeeze().cpu().detach().numpy()
     n, bins, patches = plt.hist(outputnp, 300, facecolor='deepskyblue')
