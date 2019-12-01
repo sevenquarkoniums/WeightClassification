@@ -1,4 +1,5 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 import argparse
 import torch
 import torch.nn as nn
@@ -15,7 +16,6 @@ import matplotlib.pyplot as plt
 import datetime
 import matplotlib.patches as mpatches
 from torch.utils.data.sampler import SubsetRandomSampler
-import sys
 '''
 Warning:
     1 num_workers>0 is super slow on windows.
@@ -23,15 +23,13 @@ Warning:
 
 mode = 'mnist'
 netType = 'gcn' # linear, 1hidden, 2hidden, 3hidden, gcn, gcn2， gcnres.
-iterationNum = 10
+iterationNum = 500
 shuffleLabel = 1
 numEpoch = 1
 middleOutput = 0
 save_model = 0
 figure = 0
-trainingSeed = sys.argv[1]
 gpu = 0
-torch.manual_seed(trainingSeed)
 fontsize = 15
 np.random.seed(0) # fix the train_test_split output.
 
@@ -363,29 +361,8 @@ def draw(loss_train, loss_test, acc):
     plt.tight_layout()
     plt.savefig('figure/%s.png' % mode)
 
-def build():
+def build(args):
     # Training settings
-    parser = argparse.ArgumentParser(description='Example')
-#    parser.add_argument('--batch-size', type=int, default=64, metavar='N',
-#                        help='input batch size for training (default: 64)')
-#    parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N',
-#                        help='input batch size for testing (default: 1000)')
-#    parser.add_argument('--epochs', type=int, default=1000, metavar='N',
-#                        help='number of epochs to train (default: 14)')
-#    parser.add_argument('--lr', type=float, default=1, metavar='LR',
-#                        help='learning rate (default: 1.0)')
-#    parser.add_argument('--gamma', type=float, default=0.99, metavar='M',
-#                        help='Learning rate step gamma (default: 0.7)')
-#    parser.add_argument('--no-cuda', action='store_true', default=False,
-#                        help='disables CUDA training')
-#    parser.add_argument('--seed', type=int, default=0, metavar='S',
-#                        help='random seed (default: 1)')
-    parser.add_argument('--log-interval', type=int, default=1000, metavar='N',
-                        help='how many batches to wait before logging training status')
-
-#    parser.add_argument('--save-model', action='store_true', default=True,
-#                        help='For Saving the current Model')
-    args = parser.parse_args()
 #    use_cuda = not args.no_cuda and torch.cuda.is_available()
 
     device = torch.device("cuda" if gpu else "cpu")
@@ -486,15 +463,15 @@ def build():
         allAcc = torch.FloatTensor(accuracy)
         allWeight = torch.stack(weight, dim=0)
         if shuffleLabel:
-            name1 = 'data/mnistShuffleAcc_%d.pt' % trainingSeed
-            name2 = 'data/mnistShuffleWeight_%d.pt' % trainingSeed
+            name1 = 'data/mnistShuffleAcc_%d.pt' % args.seed
+            name2 = 'data/mnistShuffleWeight_%d.pt' % args.seed
         else:
-            name1 = 'data/mnistAcc_%d.pt' % trainingSeed
-            name2 = 'data/mnistWeight_%d.pt' % trainingSeed
+            name1 = 'data/mnistAcc_%d.pt' % args.seed
+            name2 = 'data/mnistWeight_%d.pt' % args.seed
         torch.save(allAcc, name1)
         torch.save(allWeight, name2)
     
-def randomInput():
+def randomInput(args):
     device = torch.device("cuda")
     model = weightNet().to(device)
     model.load_state_dict(torch.load('weight.pt'))
@@ -508,9 +485,31 @@ def randomInput():
     
 def main():
     now = datetime.datetime.now()
-    
-    build()
-#    randomInput()
+    parser = argparse.ArgumentParser(description='Example')
+#    parser.add_argument('--batch-size', type=int, default=64, metavar='N',
+#                        help='input batch size for training (default: 64)')
+#    parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N',
+#                        help='input batch size for testing (default: 1000)')
+#    parser.add_argument('--epochs', type=int, default=1000, metavar='N',
+#                        help='number of epochs to train (default: 14)')
+#    parser.add_argument('--lr', type=float, default=1, metavar='LR',
+#                        help='learning rate (default: 1.0)')
+#    parser.add_argument('--gamma', type=float, default=0.99, metavar='M',
+#                        help='Learning rate step gamma (default: 0.7)')
+#    parser.add_argument('--no-cuda', action='store_true', default=False,
+#                        help='disables CUDA training')
+    parser.add_argument('-s', '--seed', type=int, default=0, metavar='S',
+                        help='seed for pytorch (default: 0)')
+    parser.add_argument('--log-interval', type=int, default=1000, metavar='N',
+                        help='how many batches to wait before logging training status')
+
+#    parser.add_argument('--save-model', action='store_true', default=True,
+#                        help='For Saving the current Model')
+    args = parser.parse_args()
+    torch.manual_seed(args.seed)
+
+    build(args)
+#    randomInput(args)
     
     print('finished in %d seconds.' % (datetime.datetime.now()-now).seconds)
 

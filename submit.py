@@ -1,4 +1,5 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 from subprocess import call
 def submit(script='name.py', shfile='run.sh', outfile='output.out', system='cori'):
     '''
@@ -10,7 +11,10 @@ def submit(script='name.py', shfile='run.sh', outfile='output.out', system='cori
         line += 'module load python/3.6-anaconda-5.2\n'
         line += 'export HDF5_USE_FILE_LOCKING=FALSE\n'
     elif system == 'scc':
-        line += 'module load anaconda3\n'
+        line += 'module load cuda/10.1\n'
+        line += 'module load python3/3.6.5\n'
+        line += 'module load pytorch/1.3\n'
+        #line += 'module load anaconda3\n'
     line += '%s\n' % script
     fsh.write(line)
     fsh.close()
@@ -24,6 +28,6 @@ def submit(script='name.py', shfile='run.sh', outfile='output.out', system='cori
         command = 'qsub -j y -o %s %s' % (outfile, shfile)
     call(command, shell=True)
 
-for seed in range(3):
-    submit('./main.py %d' % seed, 'sh/%d.sh' % seed, 'out/%d.out' % seed, 'scc')
+for seed in range(100):
+    submit('./main.py -s %d' % seed, 'sh/run%d.sh' % seed, 'out/run%d.out' % seed, 'scc')
     
