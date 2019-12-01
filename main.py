@@ -1,4 +1,4 @@
-from __future__ import print_function
+#!/usr/bin/env python
 import argparse
 import torch
 import torch.nn as nn
@@ -15,18 +15,23 @@ import matplotlib.pyplot as plt
 import datetime
 import matplotlib.patches as mpatches
 from torch.utils.data.sampler import SubsetRandomSampler
-
+import sys
 '''
 Warning:
     1 num_workers>0 is super slow on windows.
 '''
 
-mode = 'weight'
-netType = 'gcnres' # linear, 1hidden, 2hidden, 3hidden, gnn, gcn, gcn2， gcnres.
-numEpoch = 10
-middleOutput = 1
-save_model = 1
-torch.manual_seed(0)
+mode = 'mnist'
+netType = 'gcn' # linear, 1hidden, 2hidden, 3hidden, gcn, gcn2， gcnres.
+iterationNum = 10
+shuffleLabel = 1
+numEpoch = 1
+middleOutput = 0
+save_model = 0
+figure = 0
+trainingSeed = sys.argv[1]
+gpu = 0
+torch.manual_seed(trainingSeed)
 fontsize = 15
 np.random.seed(0) # fix the train_test_split output.
 
@@ -40,9 +45,9 @@ class mnistNet(nn.Module):
 #        self.fc1 = nn.Linear(9216, 128)
 #        self.fc2 = nn.Linear(128, 10)
         self.conv1 = nn.Conv2d(in_channels=1, out_channels=16, kernel_size=3, stride=1, padding=1)
-        self.conv2 = nn.Conv2d(16, 2, 3, 1)
-        self.fc1 = nn.Linear(72, 10)
-        self.fc2 = nn.Linear(10, 10)
+        self.conv2 = nn.Conv2d(16, 4, 3, 1)
+        self.fc1 = nn.Linear(144, 16)
+        self.fc2 = nn.Linear(16, 10)
 
     def forward(self, x):
         x = self.conv1(x)
@@ -94,20 +99,6 @@ class weightNet(nn.Module):
             self.fc2 = nn.Linear(num1, num2)
             self.fc3 = nn.Linear(num2, num3)
             self.fc4 = nn.Linear(num3, 1)
-        elif netType == 'gnn':
-            # No weights are shared. very slow. need update.
-            self.channel = 10
-            self.link = nn.ModuleDict()
-            for c in range(self.channel):
-                for i in range(8):
-                    self.link['(1,%d,0,%d)' % (c,i)] = nn.Linear(13, 1)
-                for i in range(8):
-                    self.link['(1,%d,1,%d)' % (c,i)] = nn.Linear(12, 1)
-                for i in range(3):
-                    self.link['(1,%d,2,%d)' % (c,i)] = nn.Linear(4, 1)
-            self.fc1 = nn.Linear(190, 100)
-            self.fc2 = nn.Linear(100, 100)
-            self.fc3 = nn.Linear(100, 1)
         elif netType == 'gcn':
             # Sharing weights.
             self.channel = 32
@@ -161,23 +152,6 @@ class weightNet(nn.Module):
             x = F.relu(self.fc2(x))
             x = F.relu(self.fc3(x))
             x = torch.sigmoid(self.fc4(x))
-        elif netType == 'gnn':
-            # mapping is wrong.
-            layer1 = []
-            for c in range(self.channel):
-                for i in range(8):
-                    idx = [4*i+0,4*i+1,4*i+2,4*i+3,i+32,8*i+40,8*i+41,8*i+42,8*i+43,8*i+44,8*i+45,8*i+46,8*i+47]
-                    layer1.append(self.link['(1,%d,0,%d)' % (c,i)](x[:,idx]))
-                for i in range(8):
-                    idx = [8*i+40,8*i+41,8*i+42,8*i+43,8*i+44,8*i+45,8*i+46,8*i+47,i+104,3*i+112,3*i+113,3*i+114]
-                    layer1.append(self.link['(1,%d,1,%d)' % (c,i)](x[:,idx]))
-                for i in range(3):
-                    idx = [3*i+112,3*i+113,3*i+114,i+136]
-                    layer1.append(self.link['(1,%d,2,%d)' % (c,i)](x[:,idx]))
-            x = F.relu(torch.cat(layer1, dim=1))
-            x = F.relu(self.fc1(x))
-            x = F.relu(self.fc2(x))
-            x = torch.sigmoid(self.fc3(x))
         elif netType == 'gcn':
             layer1 = []
             for i in range(8):
@@ -402,8 +376,8 @@ def build():
 #                        help='learning rate (default: 1.0)')
 #    parser.add_argument('--gamma', type=float, default=0.99, metavar='M',
 #                        help='Learning rate step gamma (default: 0.7)')
-    parser.add_argument('--no-cuda', action='store_true', default=False,
-                        help='disables CUDA training')
+#    parser.add_argument('--no-cuda', action='store_true', default=False,
+#                        help='disables CUDA training')
 #    parser.add_argument('--seed', type=int, default=0, metavar='S',
 #                        help='random seed (default: 1)')
     parser.add_argument('--log-interval', type=int, default=1000, metavar='N',
@@ -412,26 +386,22 @@ def build():
 #    parser.add_argument('--save-model', action='store_true', default=True,
 #                        help='For Saving the current Model')
     args = parser.parse_args()
-    use_cuda = not args.no_cuda and torch.cuda.is_available()
+#    use_cuda = not args.no_cuda and torch.cuda.is_available()
 
-    device = torch.device("cuda" if use_cuda else "cpu")
-    kwargs = {'num_workers': 0, 'pin_memory': True} if use_cuda else {}
+    device = torch.device("cuda" if gpu else "cpu")
+    kwargs = {'num_workers': 0, 'pin_memory': True} if gpu else {}
     # loading data.
     print('loading data..')
     if mode == 'mnist':
-        train_loader = torch.utils.data.DataLoader(
-            datasets.MNIST('data', train=True, download=True,
+        trainset = datasets.MNIST('data', train=True, download=True,
                            transform=transforms.Compose([
                                transforms.ToTensor(),
                                transforms.Normalize((0.1307,), (0.3081,))
-                           ])),
-            batch_size=64, shuffle=True, **kwargs)
-        test_loader = torch.utils.data.DataLoader(
-            datasets.MNIST('data', train=False, transform=transforms.Compose([
+                           ]))
+        testset = datasets.MNIST('data', train=False, transform=transforms.Compose([
                                transforms.ToTensor(),
                                transforms.Normalize((0.1307,), (0.3081,))
-                           ])),
-            batch_size=1000, shuffle=True, **kwargs)
+                           ]))
     elif mode == 'iris':
         iris = sklearndatasets.load_iris()
         scaled = scale(iris.data)
@@ -459,38 +429,70 @@ def build():
 
     print('finish loading.')
 
+    accuracy, weight = [], []
+    for iteration in range(iterationNum):
+        if iteration % 10 == 0:
+            print('iter %d' % iteration)
+        if mode == 'mnist':
+            if shuffleLabel:
+                trainset.targets = torch.randint(0, 10, (60000,))
+            train_loader = torch.utils.data.DataLoader(trainset, batch_size=64, shuffle=True, **kwargs)
+            test_loader = torch.utils.data.DataLoader(testset, batch_size=1000, shuffle=True, **kwargs)
+            model = mnistNet().to(device)
+            optimizer = optim.Adadelta(model.parameters(), lr=1)
+#            scheduler = StepLR(optimizer, step_size=1, gamma=0.7)
+            criterion = None
+        elif mode == 'iris':
+            model = irisNet().to(device)
+    #        optimizer = optim.Adadelta(model.parameters(), lr=1)
+            optimizer = optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.999), weight_decay=0)
+            scheduler = StepLR(optimizer, step_size=1, gamma=0.97)
+            criterion = torch.nn.CrossEntropyLoss(reduction='sum')
+        elif mode == 'weight':
+            model = weightNet().to(device)
+    #        optimizer = optim.Adadelta(model.parameters(), lr=1)
+            optimizer = optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.999), weight_decay=0)
+            scheduler = StepLR(optimizer, step_size=1, gamma=0.99)
+            criterion = torch.nn.MSELoss(reduction='sum')
+        loss_train, loss_test, acc = [], [], []
+        for epoch in range(numEpoch):
+            thisTrain = train(args, model, device, train_loader, optimizer, epoch, criterion)
+            loss_train.append(thisTrain)
+            thisTest = test(args, model, device, test_loader, criterion)
+            loss_test.append(thisTest[0])
+            acc.append(thisTest[1])
+#            if mode == 'mnist': # no need scheduler if using adam.
+#                scheduler.step()
+        if save_model:
+            torch.save(model.state_dict(), "%s.pt" % mode)
+        if figure:
+            draw(loss_train, loss_test, acc)
+    #    print(model.state_dict())
+        if mode == 'mnist':
+            accuracy.append(sum(acc)/len(acc))
+            weightlist = [model.state_dict()['conv1.weight'].view(1, -1).squeeze(),
+                          model.state_dict()['conv1.bias'],
+                          model.state_dict()['conv2.weight'].view(1, -1).squeeze(),
+                          model.state_dict()['conv2.bias'],
+                          model.state_dict()['fc1.weight'].view(1, -1).squeeze(),
+                          model.state_dict()['fc1.bias'],
+                          model.state_dict()['fc2.weight'].view(1, -1).squeeze(),
+                          model.state_dict()['fc2.bias']
+                          ]
+            catweight = torch.cat(weightlist, dim=0)
+            weight.append(catweight)
     if mode == 'mnist':
-        model = mnistNet().to(device)
-        optimizer = optim.Adadelta(model.parameters(), lr=1)
-        scheduler = StepLR(optimizer, step_size=1, gamma=0.7)
-        criterion = None
-    elif mode == 'iris':
-        model = irisNet().to(device)
-#        optimizer = optim.Adadelta(model.parameters(), lr=1)
-        optimizer = optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.999), weight_decay=0)
-        scheduler = StepLR(optimizer, step_size=1, gamma=0.97)
-        criterion = torch.nn.CrossEntropyLoss(reduction='sum')
-    elif mode == 'weight':
-        model = weightNet().to(device)
-#        optimizer = optim.Adadelta(model.parameters(), lr=1)
-        optimizer = optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.999), weight_decay=0)
-        scheduler = StepLR(optimizer, step_size=1, gamma=0.99)
-        criterion = torch.nn.MSELoss(reduction='sum')
-    loss_train, loss_test, acc = [], [], []
-    for epoch in range(numEpoch):
-        if epoch % 100 == 0:
-            print('epoch %d' % epoch)
-        thisTrain = train(args, model, device, train_loader, optimizer, epoch, criterion)
-        loss_train.append(thisTrain)
-        thisTest = test(args, model, device, test_loader, criterion)
-        loss_test.append(thisTest[0])
-        acc.append(thisTest[1])
-#        scheduler.step() # no need scheduler if using adam.
-#    print(model.state_dict())
-    if save_model:
-        torch.save(model.state_dict(), "%s.pt" % mode)
-
-    draw(loss_train, loss_test, acc)
+        print('avg accuracy: %.3f +- %.3f' % (sum(accuracy)/len(accuracy), np.std(accuracy)))
+        allAcc = torch.FloatTensor(accuracy)
+        allWeight = torch.stack(weight, dim=0)
+        if shuffleLabel:
+            name1 = 'data/mnistShuffleAcc_%d.pt' % trainingSeed
+            name2 = 'data/mnistShuffleWeight_%d.pt' % trainingSeed
+        else:
+            name1 = 'data/mnistAcc_%d.pt' % trainingSeed
+            name2 = 'data/mnistWeight_%d.pt' % trainingSeed
+        torch.save(allAcc, name1)
+        torch.save(allWeight, name2)
     
 def randomInput():
     device = torch.device("cuda")
