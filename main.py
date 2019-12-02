@@ -23,13 +23,13 @@ Warning:
 
 mode = 'mnist'
 netType = 'gcn' # linear, 1hidden, 2hidden, 3hidden, gcn, gcn2， gcnres.
-iterationNum = 500
+iterationNum = 1
 shuffleLabel = 1
 numEpoch = 1
-middleOutput = 0
+middleOutput = 1
 save_model = 0
 figure = 0
-gpu = 0
+gpu = 1
 fontsize = 15
 np.random.seed(0) # fix the train_test_split output.
 
@@ -299,6 +299,8 @@ def train(args, model, device, train_loader, optimizer, epoch, criterion):
             print('Train Epoch: {} [{}]'.format(
                 epoch, batch_idx * len(data)))
     lossSum /= length
+    if middleOutput:
+        print('Training loss: %.4f' % lossSum)
     return lossSum
 
 
@@ -323,6 +325,7 @@ def test(args, model, device, test_loader, criterion):
                 test_loss += F.nll_loss(output, target, reduction='sum').item()  # sum up batch loss
                 pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
                 aggregate += pred.eq(target.view_as(pred)).sum().item()
+                viewtest = torch.cat([pred,target.unsqueeze(dim=1)], dim=1)[:30, :]
             elif mode == 'weight':
                 test_loss += criterion(output, target).item()
                 aggregate += torch.abs(output - target).sum()
@@ -334,6 +337,7 @@ def test(args, model, device, test_loader, criterion):
         if mode in ['iris','mnist']:
             print('Test set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
                 test_loss, aggregate, length, 100. * accuracy))
+            print(viewtest)
         elif mode == 'weight':
             print('Test set: Average loss: {:.4f}, Error percentage: {:.1f}%\n'.format(
                 test_loss, 100. * accuracy))
@@ -446,7 +450,7 @@ def build(args):
             draw(loss_train, loss_test, acc)
     #    print(model.state_dict())
         if mode == 'mnist':
-            accuracy.append(sum(acc)/len(acc))
+            accuracy.append(acc[-1])
             weightlist = [model.state_dict()['conv1.weight'].view(1, -1).squeeze(),
                           model.state_dict()['conv1.bias'],
                           model.state_dict()['conv2.weight'].view(1, -1).squeeze(),
@@ -468,8 +472,8 @@ def build(args):
         else:
             name1 = 'data/mnistAcc_%d.pt' % args.seed
             name2 = 'data/mnistWeight_%d.pt' % args.seed
-        torch.save(allAcc, name1)
-        torch.save(allWeight, name2)
+#        torch.save(allAcc, name1)
+#        torch.save(allWeight, name2)
     
 def randomInput(args):
     device = torch.device("cuda")
